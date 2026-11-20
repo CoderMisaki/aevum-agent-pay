@@ -15,7 +15,9 @@ event — a complete on-chain audit trail.
 - **Token:** test stablecoin **tUSD8** (ERC-20, 6 decimals) at
   [`0x456569838f1d43009A91ebA4263147Afd7233483`](https://explorer-test.qday.info/address/0x456569838f1d43009A91ebA4263147Afd7233483)
 - **Contract:** `AgentPay` — see `src/AgentPay.sol`
-- **Deployed address:** *(filled in after deployment — see `deployments/aevum.json`)*
+- **Deployed address:** [`0xfb4d6F3821518E635a85118902Ef78E77CE7A285`](https://explorer-test.qday.info/address/0xfb4d6F3821518E635a85118902Ef78E77CE7A285) (deploy tx [`0x0ecd8b…`](https://explorer-test.qday.info/tx/0x0ecd8ba0b9a3f70c6a697c896445857a38fe173a7b3f42a6cfc564911a422060))
+- **Live demo:** https://codermisaki.github.io/aevum-agent-pay/ (MetaMask + Aevum Testnet)
+- **Demo video (79s):** https://github.com/CoderMisaki/aevum-agent-pay/releases/download/demo-video/aevum-agent-pay-demo.mp4
 
 ## How it works
 
