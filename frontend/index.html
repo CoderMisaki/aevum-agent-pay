@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aevum Agent Pay — Scoped Agent Payments in tUSD8</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  .sub { color: #666; margin-top: 0; }
+  section { border: 1px solid #ccc; border-radius: 10px; padding: 1rem 1.2rem; margin: 1rem 0; }
+  label { display: block; font-size: .9rem; margin: .5rem 0 .15rem; }
+  input, select { width: 100%; padding: .5rem; font-size: 1rem; box-sizing: border-box; }
+  button { margin-top: .8rem; padding: .6rem 1.1rem; font-size: 1rem; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  .mono { font-family: ui-monospace, monospace; font-size: .85rem; word-break: break-all; }
+  .ok { color: #0a7d2c; } .err { color: #c00; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  td, th { border-bottom: 1px solid #ddd; padding: .4rem .3rem; text-align: left; vertical-align: top; }
+  #log { white-space: pre-wrap; background: #f6f6f6; color: #111; padding: .8rem; border-radius: 8px; max-height: 260px; overflow: auto; font-size: .85rem; }
+  .pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px; background: #e8f5e9; color: #0a7d2c; font-size: .8rem; }
+  .pill.revoked { background: #fdecea; color: #c00; }
+</style>
+</head>
+<body>
+<h1>Aevum Agent Pay</h1>
+<p class="sub">Scoped autonomous-agent payments in tUSD8 on QDay Aevum Testnet (chain 44005).
+A payer funds an allowance for an agent: whitelisted payees, per-payment cap, total budget, expiry.
+The agent can only pay whitelisted payees within the caps, before expiry. Revocable anytime.</p>
+
+<section>
+  <h2>Wallet</h2>
+  <div id="walletStatus">Not connected.</div>
+  <button id="connectBtn">Connect MetaMask</button>
+  <div class="mono" id="contractInfo"></div>
+</section>
+
+<section>
+  <h2>Create allowance</h2>
+  <label>Agent address <input id="agentAddr" placeholder="0x..." /></label>
+  <label>Payee addresses (comma-separated) <input id="payees" placeholder="0x..., 0x..." /></label>
+  <div class="row">
+    <div><label>Per-payment cap (tUSD8) <input id="cap" type="number" min="0" step="0.01" value="10" /></label></div>
+    <div><label>Total budget (tUSD8) <input id="budget" type="number" min="0" step="0.01" value="50" /></label></div>
+  </div>
+  <div class="row">
+    <div><label>Expiry (days from now) <input id="expiryDays" type="number" min="1" value="7" /></label></div>
+    <div><label>Fund / deposit (tUSD8, must cover budget) <input id="deposit" type="number" min="0" step="0.01" value="50" /></label></div>
+  </div>
+  <button id="createBtn" disabled>Create allowance</button>
+  <div id="createOut"></div>
+</section>
+
+<section>
+  <h2>Allowances</h2>
+  <button id="refreshBtn">Refresh</button>
+  <table><thead><tr><th>ID</th><th>Payer / Agent</th><th>Cap / Budget / Spent</th><th>Expiry</th><th>Status</th></tr></thead>
+  <tbody id="allowanceRows"><tr><td colspan="5">Connect a wallet and refresh.</td></tr></tbody></table>
+</section>
+
+<section>
+  <h2>Agent: execute payment</h2>
+  <label>Allowance ID <input id="payAllowanceId" type="number" min="0" value="0" /></label>
+  <label>Payee address <input id="payPayee" placeholder="0x..." /></label>
+  <label>Amount (tUSD8) <input id="payAmount" type="number" min="0" step="0.01" value="5" /></label>
+  <button id="payBtn" disabled>Execute payment (as agent)</button>
+  <div id="payOut"></div>
+</section>
+
+<section>
+  <h2>Payer: revoke allowance</h2>
+  <label>Allowance ID <input id="revokeId" type="number" min="0" value="0" /></label>
+  <button id="revokeBtn" disabled>Revoke &amp; reclaim unspent escrow</button>
+  <div id="revokeOut"></div>
+</section>
+
+<section>
+  <h2>Receipts (PaymentExecuted events)</h2>
+  <button id="receiptsBtn">Load receipts</button>
+  <table><thead><tr><th>Receipt</th><th>Allowance</th><th>Payee</th><th>Amount</th><th>Tx</th></tr></thead>
+  <tbody id="receiptRows"><tr><td colspan="5">—</td></tr></tbody></table>
+</section>
+
+<section>
+  <h2>Log</h2>
+  <div id="log"></div>
+</section>
+
+<script src="./config.js"></script>
+<script type="module">
+import { ethers } from "https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.min.js";
+
+const TUSD8 = window.TUSD8_ADDRESS;
+const CHAIN_ID = window.AGENT_PAY_CHAIN_ID;
+const EXPLORER = window.AGENT_PAY_EXPLORER;
+const ADDR = window.AGENT_PAY_ADDRESS;
+const logEl = document.getElementById("log");
+const log = (m) => { logEl.textContent += m + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+const fmt = (v) => `${Number(v) / 1e6} tUSD8`;
+const toUnits = (x) => BigInt(Math.round(parseFloat(x) * 1e6));
+
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function approve(address,uint256) returns (bool)",
+  "function allowance(address,address) view returns (uint256)",
+];
+const PAY_ABI = [
+  "function createAllowance(address,address[],uint256,uint256,uint256,uint256) returns (uint256)",
+  "function executePayment(uint256,address,uint256) returns (uint256)",
+  "function revokeAllowance(uint256) returns (uint256)",
+  "function getAllowance(uint256) view returns (tuple(address payer,address agent,address[] payees,uint256 perPaymentCap,uint256 totalBudget,uint256 spent,uint256 expiry,bool revoked,uint256 escrowed))",
+  "function nextAllowanceId() view returns (uint256)",
+  "function isActive(uint256) view returns (bool)",
+  "event AllowanceCreated(uint256 indexed allowanceId,address indexed payer,address indexed agent,uint256 perPaymentCap,uint256 totalBudget,uint256 expiry,uint256 funded)",
+  "event PaymentExecuted(uint256 indexed receiptId,uint256 indexed allowanceId,address indexed payer,address agent,address payee,uint256 amount,uint256 timestamp)",
+];
+
+let provider, signer, account, pay, tusd8;
+
+document.getElementById("contractInfo").innerHTML =
+  `AgentPay: <a href="${EXPLORER}/address/${ADDR}" target="_blank" rel="noopener">${ADDR}</a><br>tUSD8: ${TUSD8} · Chain ${CHAIN_ID}`;
+if (ADDR === "0x0000000000000000000000000000000000000000") {
+  log("WARNING: AgentPay address not set in config.js — deploy first (see README).");
+}
+
+document.getElementById("connectBtn").onclick = async () => {
+  try {
+    if (!window.ethereum) { alert("MetaMask not found."); return; }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const net = await provider.getNetwork();
+    if (Number(net.chainId) !== CHAIN_ID) {
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x" + CHAIN_ID.toString(16) }] })
+        .catch(async () => {
+          await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{
+            chainId: "0x" + CHAIN_ID.toString(16), chainName: "QDay Aevum Testnet",
+            rpcUrls: [window.AGENT_PAY_RPC], blockExplorerUrls: [EXPLORER], nativeCurrency: { name: "tQDAY", symbol: "tQDAY", decimals: 18 },
+          }]});
+        });
+      provider = new ethers.BrowserProvider(window.ethereum);
+    }
+    signer = await provider.getSigner();
+    account = await signer.getAddress();
+    pay = new ethers.Contract(ADDR, PAY_ABI, signer);
+    tusd8 = new ethers.Contract(TUSD8, ERC20_ABI, signer);
+    document.getElementById("walletStatus").innerHTML =
+      `Connected: <span class="mono">${account}</span> · tUSD8 balance: <b>${fmt(await tusd8.balanceOf(account))}</b>`;
+    for (const id of ["createBtn", "payBtn", "revokeBtn"]) document.getElementById(id).disabled = false;
+    log(`Connected ${account}`);
+    await refreshAllowances();
+  } catch (e) { log("Connect failed: " + (e.reason || e.message)); }
+};
+
+async function refreshAllowances() {
+  const rows = document.getElementById("allowanceRows");
+  try {
+    const n = Number(await pay.nextAllowanceId());
+    if (n === 0) { rows.innerHTML = "<tr><td colspan='5'>No allowances yet.</td></tr>"; return; }
+    let html = "";
+    for (let id = 0; id < n; id++) {
+      const a = await pay.getAllowance(id);
+      const active = await pay.isActive(id);
+      const exp = new Date(Number(a.expiry) * 1000).toLocaleString();
+      html += `<tr><td>${id}</td><td class="mono">${a.payer}<br>${a.agent}</td>` +
+        `<td>${fmt(a.perPaymentCap)} / ${fmt(a.totalBudget)} / spent ${fmt(a.spent)}</td>` +
+        `<td>${exp}</td><td><span class="pill${active ? "" : " revoked"}">${active ? "active" : a.revoked ? "revoked" : "expired"}</span></td></tr>`;
+    }
+    rows.innerHTML = html;
+  } catch (e) { rows.innerHTML = `<tr><td colspan="5" class="err">Failed: ${e.reason || e.message}</td></tr>`; }
+}
+document.getElementById("refreshBtn").onclick = refreshAllowances;
+
+document.getElementById("createBtn").onclick = async () => {
+  const out = document.getElementById("createOut");
+  try {
+    const agent = document.getElementById("agentAddr").value.trim();
+    const payees = document.getElementById("payees").value.split(",").map((s) => s.trim()).filter(Boolean);
+    const cap = toUnits(document.getElementById("cap").value);
+    const budget = toUnits(document.getElementById("budget").value);
+    const deposit = toUnits(document.getElementById("deposit").value);
+    const expiry = Math.floor(Date.now() / 1000) + Number(document.getElementById("expiryDays").value) * 86400;
+    if (deposit < budget) { out.innerHTML = "<span class='err'>Deposit must cover the total budget.</span>"; return; }
+    const allowance = await tusd8.allowance(account, ADDR);
+    if (allowance < deposit) {
+      log("Approving tUSD8 spend...");
+      const tx = await tusd8.approve(ADDR, deposit);
+      await tx.wait();
+    }
+    const tx = await pay.createAllowance(agent, payees, cap, budget, expiry, deposit);
+    out.innerHTML = "Creating… tx <a class='mono' target='_blank' href='" + EXPLORER + "/tx/" + tx.hash + "'>" + tx.hash.slice(0, 18) + "…</a>";
+    const rc = await tx.wait();
+    const ev = rc.logs.map((l) => { try { return pay.interface.parseLog(l); } catch { return null; } }).find((e) => e?.name === "AllowanceCreated");
+    out.innerHTML = `<span class="ok">Allowance #${ev.args.allowanceId} created.</span> <a target="_blank" href="${EXPLORER}/tx/${tx.hash}">Explorer</a>`;
+    log(`Allowance #${ev.args.allowanceId} created`);
+    await refreshAllowances();
+  } catch (e) { out.innerHTML = "<span class='err'>Failed: " + (e.reason || e.message) + "</span>"; }
+};
+
+document.getElementById("payBtn").onclick = async () => {
+  const out = document.getElementById("payOut");
+  try {
+    const id = Number(document.getElementById("payAllowanceId").value);
+    const payee = document.getElementById("payPayee").value.trim();
+    const amount = toUnits(document.getElementById("payAmount").value);
+    const tx = await pay.executePayment(id, payee, amount);
+    out.innerHTML = "Paying…";
+    const rc = await tx.wait();
+    const ev = rc.logs.map((l) => { try { return pay.interface.parseLog(l); } catch { return null; } }).find((e) => e?.name === "PaymentExecuted");
+    out.innerHTML = `<span class="ok">Paid. Receipt #${ev.args.receiptId}.</span> <a target="_blank" href="${EXPLORER}/tx/${tx.hash}">Explorer</a>`;
+    log(`Payment receipt #${ev.args.receiptId} (allowance #${id}, ${fmt(amount)} -> ${payee})`);
+    await refreshAllowances();
+  } catch (e) { out.innerHTML = "<span class='err'>Failed: " + (e.reason || e.message) + "</span>"; }
+};
+
+document.getElementById("revokeBtn").onclick = async () => {
+  const out = document.getElementById("revokeOut");
+  try {
+    const id = Number(document.getElementById("revokeId").value);
+    const tx = await pay.revokeAllowance(id);
+    out.innerHTML = "Revoking…";
+    await tx.wait();
+    out.innerHTML = `<span class="ok">Allowance #${id} revoked, unspent escrow refunded.</span> <a target="_blank" href="${EXPLORER}/tx/${tx.hash}">Explorer</a>`;
+    log(`Allowance #${id} revoked`);
+    await refreshAllowances();
+  } catch (e) { out.innerHTML = "<span class='err'>Failed: " + (e.reason || e.message) + "</span>"; }
+};
+
+document.getElementById("receiptsBtn").onclick = async () => {
+  const rows = document.getElementById("receiptRows");
+  try {
+    const ro = new ethers.Contract(ADDR, PAY_ABI, provider ?? new ethers.JsonRpcProvider(window.AGENT_PAY_RPC));
+    const events = await ro.queryFilter("PaymentExecuted", 0, "latest");
+    if (!events.length) { rows.innerHTML = "<tr><td colspan='5'>No receipts yet.</td></tr>"; return; }
+    rows.innerHTML = events.slice(-20).reverse().map((e) =>
+      `<tr><td>#${e.args.receiptId}</td><td>${e.args.allowanceId}</td><td class="mono">${e.args.payee}</td>` +
+      `<td>${fmt(e.args.amount)}</td><td><a class="mono" target="_blank" href="${EXPLORER}/tx/${e.transactionHash}">${e.transactionHash.slice(0, 14)}…</a></td></tr>`).join("");
+  } catch (e) { rows.innerHTML = `<tr><td colspan="5" class="err">Failed: ${e.reason || e.message}</td></tr>`; }
+};
+</script>
+</body>
+</html>

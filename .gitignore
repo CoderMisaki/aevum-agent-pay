@@ -1,0 +1,15 @@
+# Build artifacts
+out/
+cache/
+broadcast/
+
+# Dependencies
+node_modules/
+
+# Secrets — NEVER commit keys or env files
+.env
+.env.*
+*.key
+*.pem
+.keys/
+deployments/*.local.json

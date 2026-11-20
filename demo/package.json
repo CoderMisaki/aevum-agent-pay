@@ -1,0 +1,1 @@
+{"dependencies":{"ethers":"^6.13.0"},"description":"Headless end-to-end demo of Aevum Agent Pay on QDay Aevum Testnet","name":"aevum-agent-pay-demo","private":true,"scripts":{"demo":"node demo.mjs"},"type":"module","version":"1.0.0"}
