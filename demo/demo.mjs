@@ -83,7 +83,7 @@ async function main() {
   const budget = BigInt(Math.round(parseFloat(process.env.DEMO_BUDGET_TUSD8 ?? "5") * 1e6));
   const payAmount = BigInt(Math.round(parseFloat(process.env.DEMO_PAY_TUSD8 ?? "1") * 1e6));
   const expiry = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
-  console.log("\n[1] Payer creates allowance (cap 10, budget 50, expiry +7d)...");
+  console.log("\n[1] Payer creates allowance (cap 2, budget 5, expiry +7d)...");
   const allowance = await tusd8.allowance(payer.address, agentPayAddress);
   if (allowance < budget) {
     const tx = await tusd8.connect(payer).approve(agentPayAddress, budget);

@@ -231,7 +231,10 @@ document.getElementById("receiptsBtn").onclick = async () => {
   const rows = document.getElementById("receiptRows");
   try {
     const ro = new ethers.Contract(ADDR, PAY_ABI, provider ?? new ethers.JsonRpcProvider(window.AGENT_PAY_RPC));
-    const events = await ro.queryFilter("PaymentExecuted", 0, "latest");
+    // Aevum's RPC caps eth_getLogs to a 1000-block range, so query the
+    // recent window instead of from block 0.
+    const latest = await ro.runner.provider.getBlockNumber();
+    const events = await ro.queryFilter("PaymentExecuted", Math.max(0, latest - 900), "latest");
     if (!events.length) { rows.innerHTML = "<tr><td colspan='5'>No receipts yet.</td></tr>"; return; }
     rows.innerHTML = events.slice(-20).reverse().map((e) =>
       `<tr><td>#${e.args.receiptId}</td><td>${e.args.allowanceId}</td><td class="mono">${e.args.payee}</td>` +
