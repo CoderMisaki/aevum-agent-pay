@@ -2,9 +2,10 @@
 //
 // Flow:
 //   1. Payer approves AgentPay and creates an allowance for the agent
-//      (payee whitelisted, per-payment cap 10 tUSD8, total budget 50 tUSD8,
-//      expiry +7 days, funded with 50 tUSD8 escrow).
-//   2. Agent executes a 5 tUSD8 payment to the whitelisted payee.
+//      (payee whitelisted, per-payment cap 2 tUSD8, total budget 5 tUSD8,
+//      expiry +7 days, funded with 5 tUSD8 escrow — sized to the Discord
+//      faucet's 5 tUSD8; override via DEMO_*_TUSD8 env vars).
+//   2. Agent executes a 1 tUSD8 payment to the whitelisted payee.
 //   3. Agent tries to pay a NON-whitelisted address -> must revert.
 //   4. Payer revokes the allowance and reclaims the unspent escrow.
 //
@@ -75,9 +76,12 @@ async function main() {
   console.log("Payer tUSD8 balance:", fmt(await tusd8.balanceOf(payer.address)));
   console.log("Payer tQDAY balance:", ethers.formatEther(await provider.getBalance(payer.address)));
 
-  // 1. Approve + create allowance (cap 10, budget 50, 7-day expiry, 50 escrow).
-  const cap = 10n * ONE;
-  const budget = 50n * ONE;
+  // 1. Approve + create allowance (cap 2, budget 5, 7-day expiry, 5 escrow).
+  //    Defaults fit the Discord faucet's 5 tUSD8; override with env:
+  //    DEMO_CAP_TUSD8 / DEMO_BUDGET_TUSD8 / DEMO_PAY_TUSD8.
+  const cap = BigInt(Math.round(parseFloat(process.env.DEMO_CAP_TUSD8 ?? "2") * 1e6));
+  const budget = BigInt(Math.round(parseFloat(process.env.DEMO_BUDGET_TUSD8 ?? "5") * 1e6));
+  const payAmount = BigInt(Math.round(parseFloat(process.env.DEMO_PAY_TUSD8 ?? "1") * 1e6));
   const expiry = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
   console.log("\n[1] Payer creates allowance (cap 10, budget 50, expiry +7d)...");
   const allowance = await tusd8.allowance(payer.address, agentPayAddress);
@@ -95,10 +99,9 @@ async function main() {
     .find((e) => e?.name === "AllowanceCreated");
   const allowanceId = created.args.allowanceId;
   console.log(`    allowance #${allowanceId} created, tx: ${EXPLORER}/tx/${createTx.hash}`);
-
-  // 2. Agent pays the whitelisted payee 5 tUSD8.
-  console.log("\n[2] Agent pays payee 5 tUSD8...");
-  const payTx = await agentPay.connect(agent).executePayment(allowanceId, payee.address, 5n * ONE);
+  // 2. Agent pays the whitelisted payee (default 1 tUSD8).
+  console.log(`\n[2] Agent pays payee ${Number(payAmount) / 1e6} tUSD8...`);
+  const payTx = await agentPay.connect(agent).executePayment(allowanceId, payee.address, payAmount);
   const payRc = await payTx.wait();
   const receipt = payRc.logs
     .map((l) => { try { return agentPay.interface.parseLog(l); } catch { return null; } })
@@ -117,7 +120,7 @@ async function main() {
     console.log("    reverted as expected:", (e.reason ?? e.shortMessage ?? String(e)).slice(0, 120));
   }
 
-  // 4. Payer revokes and reclaims the unspent 45 tUSD8.
+  // 4. Payer revokes and reclaims the unspent escrow (budget - paid).
   console.log("\n[4] Payer revokes allowance...");
   const revokeTx = await agentPay.connect(payer).revokeAllowance(allowanceId);
   await revokeTx.wait();

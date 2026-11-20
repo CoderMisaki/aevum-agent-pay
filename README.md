@@ -54,10 +54,19 @@ forge test --match-contract AgentPayForkTest   # live fork vs the REAL tUSD8
 
 ### 2. Get testnet funds
 
-Faucet: <https://faucet.qday.info/en> — 5 tQDAY + 1 tUSD8 per 24h per address,
-no signing needed. Note: the live faucet checks that the recipient address holds
-ETH, USDT or USDC on Ethereum mainnet (anti-bot). Fallback: the QDay Discord
-`/faucet` command (1 tQDAY + 5 tUSD8).
+**Recommended — Discord faucet:** join the QDay Discord, react ✅ in `#verify`
+to get the Verified role, then type `/faucet <your wallet address>`. You get
+**1 tQDAY + 5 tUSD8**, once per Discord account and once per address, and it
+does **not** check for an Ethereum mainnet balance — a fresh testnet-only wallet
+works. (Source: Aevum Starter Kit docs.)
+
+**Web faucet:** <https://faucet.qday.info/en> — 5 tQDAY + 1 tUSD8 per 24h per
+address, no signing needed — but the live faucet checks that the recipient
+address holds ETH, USDT or USDC on Ethereum mainnet (anti-bot). Our known
+wallets hold none of those on mainnet, so the Discord faucet is the way in.
+
+Gas is cheap (~1 gwei): 1 tQDAY covers hundreds of calls; deploying AgentPay
+costs well under 0.01 tQDAY.
 
 ### 3. Deploy
 
@@ -75,9 +84,11 @@ cd demo && npm install
 npm run demo
 ```
 
-The demo creates an allowance (cap 10, budget 50, 7-day expiry), has the agent
-pay the whitelisted payee 5 tUSD8, proves a non-whitelisted payment reverts, then
-revokes and reclaims the unspent 45 tUSD8. It reads three test wallets from
+The demo creates an allowance (cap 2, budget 5, 7-day expiry — sized to the
+Discord faucet's 5 tUSD8), has the agent pay the whitelisted payee 1 tUSD8,
+proves a non-whitelisted payment reverts, then revokes and reclaims the unspent
+4 tUSD8. Amounts are overridable via `DEMO_CAP_TUSD8` / `DEMO_BUDGET_TUSD8` /
+`DEMO_PAY_TUSD8`. It reads three test wallets from
 `../.keys/{payer,agent,payee}.json` (generated locally, mode 600, never committed)
 and the contract address from `AGENT_PAY_ADDRESS` or `deployments/aevum.json`.
 
